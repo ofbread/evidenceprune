@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claimprune"
+version = "0.1.0"
+description = "Claim-conditioned context pruning for fact-checking with distilled small models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+dependencies = [
+    "torch>=2.4",
+    "transformers>=4.48",
+    "huggingface_hub>=0.25",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+claimprune = "claimprune.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["claimprune*"]
