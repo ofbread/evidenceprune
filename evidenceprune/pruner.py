@@ -1,21 +1,12 @@
-"""Claim-conditioned context pruning with a distilled student.
-
-    from claimprune import Pruner
-    pruner = Pruner("<hf-id-or-local-dir>")           # the 2B decoder or the 0.4B encoder
-    kept = pruner.prune(claim, documents)             # documents: list of str or {"text", "title", "url"}
-
-Each document is cut into windows of 48 sentences / 10,000 characters, every window is
-scored in one forward pass, and the sentences whose P(keep) reaches the model's threshold
-are copied VERBATIM (as slices of the original text, joined with "[…]" where a gap was
-cut). The deployed reading rule applies by default: at most 16 windows per document, and
-reading stops after two consecutive windows in which nothing is kept.
-"""
+"""Prune documents to the sentences that are relevant for a claim."""
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 from . import prompt as P
 from .sentences import windows as _windows
@@ -23,8 +14,17 @@ from .sentences import windows as _windows
 Scorer = Callable[[str, str, list[int]], list[float]]   # (prompt, system, global ids) -> P(keep) per id
 
 DEFAULT_THRESHOLDS = {"decoder": 0.3073580265045166, "encoder": 0.3458289667963982}
-DOC_CEILING = 12_000        # characters one document may contribute (cut at a sentence boundary)
+DOC_CEILING = 12_000
 ELISION = "\n\n[…]\n\n"
+
+
+def domain_of(url: str) -> str:
+    """The host of a url, lower-cased, without a leading www."""
+    try:
+        h = (urlparse(url).netloc or "").lower()
+    except Exception:  
+        return ""
+    return h[4:] if h.startswith("www.") else h
 
 
 @dataclass
@@ -33,6 +33,10 @@ class Document:
     title: str = ""
     url: str = ""
     domain: str = ""
+
+    def __post_init__(self):
+        if not self.domain and self.url:
+            self.domain = domain_of(self.url)
 
     @classmethod
     def of(cls, d) -> "Document":
@@ -47,13 +51,15 @@ class Document:
 @dataclass
 class Pruned:
     """What was kept from one document."""
-    text: str                                  # the kept sentences, verbatim slices joined with "[…]"
-    kept: list[tuple[int, int]]                # (start, end) offsets of the kept sentences in the source
-    probs: dict[int, float]                    # P(keep) per sentence index actually read
-    n_sentences: int
+    text: str                                  # the kept sentences, gaps marked with […]
+    kept: list[tuple[int, int]]                # (start, end) of each kept sentence in the document's text
+    probs: dict[int, float]                    # sentence index -> P(keep), for the sentences that were read
+    n_sentences: int                           # sentences in the document's text
     n_windows: int                             # windows in the document
-    windows_read: int                          # windows the model actually read (cap / stop rule)
+    windows_read: int                         
     stopped_early: bool
+    title_kept: bool = False                   # the title is scored too
+    title_prob: float | None = None
     source: Document = field(repr=False, default=None)
 
     @property
@@ -62,25 +68,32 @@ class Pruned:
 
 
 def _load_threshold(model_dir: str, kind: str) -> float:
-    p = Path(model_dir) / "claimprune.json"
+    p = Path(model_dir) / "evidenceprune.json"
     if p.exists():
         try:
             return float(json.loads(p.read_text())["threshold"])
-        except Exception:  # noqa: BLE001
+        except Exception:  
             pass
     return DEFAULT_THRESHOLDS[kind]
 
 
 def _resolve(model: str) -> str:
-    """A local directory as given; otherwise a Hugging Face Hub id, downloaded once."""
-    if Path(model).is_dir():
-        return model
-    from huggingface_hub import snapshot_download
-    return snapshot_download(model)
+    d = Path(model).expanduser()
+    if d.is_dir() and (d / "config.json").exists():
+        return str(d)
+    if re.fullmatch(r"[\w.-]+/[\w.-]+", model) and not d.exists():
+        from huggingface_hub import snapshot_download
+        try:
+            return snapshot_download(model)
+        except Exception as e:  
+            raise FileNotFoundError(f"{model} is not a local checkpoint folder, and fetching it from the "
+                                    f"Hugging Face Hub failed: {e}") from None
+    raise FileNotFoundError(f"{model} is not a checkpoint folder (no config.json) and not a Hub id such as "
+                            f"ofbread/evidenceprune-modernbert-large")
 
 
 def merge_intervals(spans: list[tuple[int, int]], picks: list[int]) -> list[tuple[int, int]]:
-    """The picked sentences' spans, merged where adjacent (radius 0: the cited sentence only)."""
+    """Kept sentences as (start, end) intervals."""
     out: list[list[int]] = []
     for i in sorted(set(picks)):
         a, b = spans[i]
@@ -92,7 +105,7 @@ def merge_intervals(spans: list[tuple[int, int]], picks: list[int]) -> list[tupl
 
 
 def cap_document(text: str, ceiling: int = DOC_CEILING) -> str:
-    """Trim one document's emission at a sentence boundary, never mid-word."""
+
     if not ceiling or len(text) <= ceiling:
         return text
     cut = text[:ceiling]
@@ -104,13 +117,6 @@ def cap_document(text: str, ceiling: int = DOC_CEILING) -> str:
 
 
 class Pruner:
-    """A distilled claim-conditioned sentence selector.
-
-    model: a Hugging Face Hub id or a local checkpoint directory. The kind (decoder or
-    encoder) is read from the checkpoint's config; the keep threshold from its
-    `claimprune.json` when present, else the published default for that kind.
-    scorer: for tests, a callable (prompt, system, ids) -> P(keep) list instead of a model.
-    """
 
     def __init__(self, model: str | None = None, *, threshold: float | None = None,
                  scorer: Scorer | None = None, device: str | None = None):
@@ -121,7 +127,7 @@ class Pruner:
             self.threshold = threshold if threshold is not None else DEFAULT_THRESHOLDS["decoder"]
             return
         if not model:
-            raise ValueError("give a model id or directory, or a scorer")
+            raise ValueError("give the checkpoint folder, or a scorer")
         model_dir = _resolve(model)
         from .encoder import is_encoder_dir
         if is_encoder_dir(model_dir):
@@ -134,14 +140,19 @@ class Pruner:
             self.scorer = DecoderScorer(model_dir, device=device).score
         self.threshold = threshold if threshold is not None else _load_threshold(model_dir, self.kind)
 
-    # ------------------------------------------------------------------ one document --
+    # prune one document
     def prune_document(self, claim: str, doc, *, requirements: list[str] | None = None,
                        claim_date: str = "", speaker: str = "", cap_windows: int = 16,
                        stop_after_empty: int = 2, doc_ceiling: int = DOC_CEILING) -> Pruned:
         d = Document.of(doc)
         text = d.text or ""
-        wins = _windows(text)
+        # The model reads the title as the first line of the document, so the title is
+        # sentence 0 and the page's sentences follow it. Offsets are mapped back below.
+        full = f"{d.title}\n{text}"
+        off = len(d.title) + 1
+        wins = _windows(full)
         n_all = len(wins)
+        all_spans = [sp for w in wins for sp in w]
         if cap_windows and len(wins) > cap_windows:
             wins = wins[:cap_windows]
         spans = [sp for w in wins for sp in w]
@@ -149,7 +160,7 @@ class Pruner:
         probs: dict[int, float] = {}
         base, empties, read, stopped = 0, 0, 0, False
         for n, w in enumerate(wins, 1):
-            prompt = P.render(claim, text, w, base, requirements=requirements, claim_date=claim_date,
+            prompt = P.render(claim, full, w, base, requirements=requirements, claim_date=claim_date,
                               speaker=speaker, title=d.title, url=d.url, domain=d.domain, part=n, of=len(wins))
             ids = list(range(base, base + len(w)))
             ps = self.scorer(prompt, self.system, ids)
@@ -167,12 +178,17 @@ class Pruner:
                     stopped = True
                     break
         ivals = merge_intervals(spans, picks) if picks else []
-        out = ELISION.join(text[a:b].strip() for a, b in ivals if text[a:b].strip())
+        out = ELISION.join(full[a:b].strip() for a, b in ivals if full[a:b].strip())
         out = cap_document(out, doc_ceiling)
-        return Pruned(text=out, kept=[spans[i] for i in sorted(set(picks))], probs=probs,
-                      n_sentences=len(spans), n_windows=n_all, windows_read=read, stopped_early=stopped, source=d)
+        n_title = sum(1 for a, _ in all_spans if a < off)          # the title's sentences (0 or 1)
+        kept = [(spans[i][0] - off, spans[i][1] - off) for i in sorted(set(picks)) if spans[i][0] >= off]
+        title_probs = [probs[i] for i in range(n_title) if i in probs]
+        return Pruned(text=out, kept=kept, probs={i - n_title: p for i, p in probs.items() if i >= n_title},
+                      n_sentences=len(all_spans) - n_title, n_windows=n_all, windows_read=read,
+                      stopped_early=stopped, title_kept=any(spans[i][0] < off for i in picks),
+                      title_prob=max(title_probs) if title_probs else None, source=d)
 
-    # ------------------------------------------------------------------ a pool --
+    # prune a pool of documents
     def prune(self, claim: str, documents, **kw) -> list[Pruned]:
         """Prune every document toward the claim; the same keyword options as prune_document."""
         return [self.prune_document(claim, d, **kw) for d in documents]

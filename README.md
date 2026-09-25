@@ -1,97 +1,138 @@
-# claimprune
+# evidenceprune
 
-Claim-conditioned context pruning with small distilled models. Give it a claim and a set of
-web pages; it returns, for each page, the sentences a fact-checker would need, copied
-verbatim from the page.
+Lightweight models that prune web pages down to the content a fact-checker would need
+for a given claim.
 
-The two released models are students of a 27B LLM extractor: they were trained to reproduce
-its keep-or-drop decision for every sentence of a page, and they reach its judged coverage
-and sufficiency on AVeriTeC at a fraction of the cost (see the paper).
+Given a claim and one or more pages of plain text, for each page it returns the
+sentences to keep. The goal is to turn a set of long, mostly irrelevant
+pages into a short evidence pool that is dense in information.
 
-| model | size | how it reads | per window (H100) |
-|---|---|---|---|
-| `claimprune-qwen3.5-2b` | 2B decoder | the full prompt; one forward pass, no generation | 0.14 s |
-| `claimprune-modernbert-large` | 0.4B encoder | the prompt's head + the sentences, token classification | 0.016 s |
+- `evidenceprune-qwen3.5-2b`: a 2B decoder, fine-tuned from Qwen3.5-2B.
+- `evidenceprune-modernbert-large`: a 0.4B encoder, fine-tuned from ModernBERT-large.
 
 ## Install
 
 ```
-pip install claimprune            # or: pip install -e .   from this directory
+git clone https://github.com/ofbread/evidenceprune
+cd evidenceprune
+pip install -e .
 ```
 
-Requires Python 3.10+, `torch`, `transformers` (≥ 5.0 for the Qwen3.5 decoder; the encoder
-also works on 4.48+) and `huggingface_hub`. A GPU is not required; the encoder is usable on a
-CPU.
+Fetch a model from Hugging Face:
 
-## Use
+```
+hf download ofbread/evidenceprune-modernbert-large --local-dir checkpoints/evidenceprune-modernbert-large
+hf download ofbread/evidenceprune-qwen3.5-2b --local-dir checkpoints/evidenceprune-qwen3.5-2b
+```
+
+
+## Example
+
+A claim and two pages.
 
 ```python
-from claimprune import Pruner
+from evidenceprune import Pruner
 
-pruner = Pruner("<org>/claimprune-modernbert-large")   # or a local checkpoint directory
-claim = "Wearing face masks will stop the spread of covid 19"
-docs = [{"text": open("page1.txt").read(), "title": "Community Use of Masks", "url": "https://..."},
-        {"text": open("page2.txt").read()}]
+pruner = Pruner("checkpoints/evidenceprune-modernbert-large")
 
-for r in pruner.prune(claim, docs):
-    print(r.text)          # the kept sentences, verbatim, "[…]" where text was cut between them
-    print(r.kept)          # (start, end) offsets of each kept sentence in the source text
-    print(r.windows_read, "of", r.n_windows, "windows read")
+claim = "General Motors sold its Lordstown, Ohio assembly plant to Lordstown Motors in November 2019."
+
+pages = [
+    {"title": "GM completes sale of Lordstown plant to electric truck startup",
+     "url": "https://www.example-news.com/business/gm-lordstown-sale",
+     "text": """Skip to main content
+Home  |  Business  |  Autos  |  Subscribe  |  Sign in
+GM completes sale of Lordstown plant to electric truck startup
+By the auto desk  ·  November 8, 2019
+General Motors said on Thursday that it had closed the sale of its idled assembly plant in Lordstown, Ohio, to Lordstown Motors Corp., a startup that plans to build electric pickup trucks there.
+The 6.2 million square foot plant built its last Chevrolet Cruze in March 2019, ending more than 50 years of production.
+GM did not disclose the price. Lordstown Motors said the deal included a loan of about $40 million from GM.
+The startup was founded by Steve Burns, who previously ran Workhorse Group, and says it wants to begin production of its Endurance pickup in late 2020.
+Elsewhere in Ohio, the Browns host the Bills on Sunday with kickoff at 1 p.m.
+Weather: cloudy, high of 48.
+Related: Ford adds shift at Kentucky truck plant · UAW members ratify new contract
+Sign up for our newsletter.  Terms of use.  Privacy policy.  © 2019 Example News
+"""},
+    {"title": "Five electric truck startups to watch in 2020",
+     "url": "https://www.example-motoring.org/features/ev-truck-startups",
+     "text": """Menu  Reviews  Features  Newsletter
+Five electric truck startups to watch in 2020
+Rivian has raised more than $2 billion from investors including Amazon and Ford and plans to start deliveries of its R1T pickup in 2020.
+Lordstown Motors bought GM's former Lordstown, Ohio assembly plant in November 2019 and plans to build its Endurance pickup there.
+Bollinger Motors is developing the boxy B2 pickup in Michigan.
+Nikola has shown the Badger, an electric and hydrogen pickup.
+Atlis, based in Arizona, is developing the XT pickup.
+Read next: the best winter tires of 2020.
+Comments are closed.
+"""},
+]
+
+results = pruner.prune(claim, pages, claim_date="2019-11-20",
+                       requirements=["When did GM sell the Lordstown plant, and to whom?",
+                                     "What did the plant make before it closed?"])
+
+for page, result in zip(pages, results):
+    print("==", page["title"])
+    print(result.text)
 ```
 
-Optional context, which the models saw in training when it was available:
-
-```python
-pruner.prune(claim, docs,
-             requirements=["Did the CDC recommend masks in 2020?", "Do masks reduce transmission?"],
-             claim_date="2020-10-29", speaker="a Facebook post")
-```
-
-Command line:
+Output of the encoder:
 
 ```
-claimprune --model <org>/claimprune-qwen3.5-2b --claim "…" --docs docs.jsonl --out kept.jsonl
-claimprune --model <org>/claimprune-modernbert-large --claim "…" --text page.txt
+== GM completes sale of Lordstown plant to electric truck startup
+By the auto desk  ·  November 8, 2019
+General Motors said on Thursday that it had closed the sale of its idled assembly plant in Lordstown, Ohio, to Lordstown Motors Corp., a startup that plans to build electric pickup trucks there.
+The 6.2 million square foot plant built its last Chevrolet Cruze in March 2019, ending more than 50 years of production.
+GM did not disclose the price. Lordstown Motors said the deal included a loan of about $40 million from GM.
+== Five electric truck startups to watch in 2020
+Lordstown Motors bought GM's former Lordstown, Ohio assembly plant in November 2019 and plans to build its Endurance pickup there.
 ```
-
-`docs.jsonl` holds one document per line: `{"text": ..., "title": ..., "url": ...}`. The output
-holds the kept text, the kept sentences with offsets, the per-sentence probabilities and the
-reading statistics for every document.
 
 ## How it works
 
-1. **Windows.** A page is split into sentences (offsets into the original text; nothing is
-   normalised) and cut into windows of at most 48 sentences or 10,000 characters.
-2. **Prompt.** Each window is shown with the claim, an optional one-line card (date, speaker),
-   an optional document card (title, source, part *n* of *m*), the points to establish, and the
-   sentences numbered globally across the page (`S17: …`). The wording is exactly the one the
-   teacher labelled with; do not change it.
-3. **Scoring.** The decoder appends a decision scaffold for every sentence and reads P(keep)
-   from the logits at each slot in one forward pass; the encoder classifies tokens and averages
-   over each sentence. A sentence is kept when P(keep) reaches the model's threshold
-   (`claimprune.json` in the checkpoint; 0.307 for the 2B, 0.346 for the encoder, set so that
-   the student keeps as much as its teacher did on held-out pages).
-4. **Reading rule.** At most 16 windows per page are read, and reading stops after two
-   consecutive windows in which nothing was kept. Change with `cap_windows` and
-   `stop_after_empty` (0 disables either).
-5. **Output.** The kept sentences are merged into contiguous slices of the original text and
-   joined with `[…]`; one page contributes at most 12,000 characters, cut at a sentence boundary.
+A page is split into sentences and read in windows of
+48 sentences, at most 10,000 characters each. Each
+window becomes a prompt: the claim, its date and speaker if given, the page's title and
+source, what must be established, and the numbered sentences. The models are used as scorers instead of autoregressively. The 2B decoder gets the prompt followed by one marker per sentence, and a single
+forward pass gives, at each marker, the logits of the tokens `keep` and `drop`. Their softmax
+is that sentence's P(keep). The encoder gets the same prompt as plain text and classifies every
+token. A sentence's P(keep) is the mean over its tokens. A sentence is kept when P(keep) is at
+or above a threshold. A page is read for at most 16 windows, and reading stops
+after two consecutive windows where nothing is kept. 
 
-Everything above is the code the paper's numbers were produced with, reduced to what
-inference needs.
+## Input
 
-## Models
+`Pruner(model, threshold=None, device=None)` loads a model.
+`prune(claim, documents, requirements=None, claim_date="", speaker="", cap_windows=16, stop_after_empty=2, doc_ceiling=12000)` reads the pages.
 
-The checkpoints live on the Hugging Face Hub (`<org>/claimprune-qwen3.5-2b`,
-`<org>/claimprune-modernbert-large`); `Pruner("<id>")` downloads them once. Each carries a
-model card with the training recipe and a `claimprune.json` with its threshold. Base models:
-`Qwen/Qwen3.5-2B` and `answerdotai/ModernBERT-large`.
+| parameter | type | meaning |
+|---|---|---|
+| `model` | str | a checkpoint folder, or a Hub id such as `ofbread/evidenceprune-modernbert-large` |
+| `claim` | str | the claim being checked |
+| `documents` | list of `{"text": str, "title": str, "url": str}` | the pages; `title` and `url` are optional but the model was trained with them; a plain string is accepted as a page |
+| `claim_date` | str, optional | when the claim was made, `YYYY-MM-DD` |
+| `speaker` | str, optional | who made the claim |
+| `requirements` | list of str, optional | what must be established to check the claim |
+| `threshold` | float, default from the checkpoint's `evidenceprune.json` (0.3074 for the 2B, 0.3458 for the encoder) | a sentence is kept when its P(keep) is at or above this |
+| `cap_windows` | int, default 16 | read at most this many windows of 48 sentences (at most 10,000 characters each) per page |
+| `stop_after_empty` | int, default 2 | stop reading a page after this many consecutive windows with nothing kept |
+| `doc_ceiling` | int, default 12000 | a page contributes at most this many characters |
+| `device` | str, optional | `cuda` or `cpu`; picked automatically when omitted |
 
-## Citation
+## Output
 
-If you use this, cite the AAAI-27 student abstract (reference to be added on acceptance).
+`prune` returns one result per document, in order:
+
+| field | type | meaning |
+|---|---|---|
+| `text` | str | the kept sentences, verbatim and in page order, gaps marked with `[…]`; empty when nothing was kept |
+| `kept` | list of (start, end) | offsets of each kept sentence in the document's `text` |
+| `sentences` | list of str | the same sentences as strings |
+| `probs` | dict, sentence index → float | P(keep) for every sentence the model read |
+| `title_kept` | bool | the title is read as the page's first sentence; whether it was kept |
+| `windows_read`, `n_windows` | int | windows the model read, windows in the page |
+| `stopped_early` | bool | whether the stop rule ended the read |
 
 ## License
 
-Apache-2.0 for the code in this repository. The model weights carry the licences of their base
-models (Apache-2.0 for both bases).
+Apache-2.0

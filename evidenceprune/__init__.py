@@ -1,4 +1,3 @@
-"""claimprune — claim-conditioned context pruning with distilled small models."""
 from .pruner import DEFAULT_THRESHOLDS, Document, Pruned, Pruner
 from .sentences import sentences, windows
 

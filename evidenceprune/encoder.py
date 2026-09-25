@@ -1,7 +1,4 @@
-"""The encoder student (ModernBERT-large, token classification): the prompt's head (claim,
-cards, points) followed by the window's sentences as plain lines, the instruction paragraph
-and the numbers dropped; P(keep) of a sentence is the mean over its tokens' P(keep).
-"""
+"""The 0.4B encoder"""
 from __future__ import annotations
 
 import json
@@ -16,7 +13,7 @@ def is_encoder_dir(model_dir: str) -> bool:
         return False
     try:
         return "bert" in str(json.loads(cfg.read_text()).get("model_type", "")).lower()
-    except Exception:  # noqa: BLE001
+    except Exception:  
         return False
 
 
@@ -53,14 +50,12 @@ class EncoderScorer:
         import transformers as T
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.tok = T.AutoTokenizer.from_pretrained(model_dir)
+        dt = torch.bfloat16 if self.device == "cuda" else None
         kw = {"num_labels": 2}
-        if self.device == "cuda":
-            kw["dtype"] = torch.bfloat16
         try:
-            self.model = T.AutoModelForTokenClassification.from_pretrained(model_dir, **kw)
-        except TypeError:
-            kw.pop("dtype", None)
-            self.model = T.AutoModelForTokenClassification.from_pretrained(model_dir, torch_dtype=torch.bfloat16, **kw)
+            self.model = T.AutoModelForTokenClassification.from_pretrained(model_dir, **({"dtype": dt} if dt else {}), **kw)
+        except TypeError:                     
+            self.model = T.AutoModelForTokenClassification.from_pretrained(model_dir, torch_dtype=dt, **kw)
         self.model.to(self.device).eval()
         self.max_len = max_len
 

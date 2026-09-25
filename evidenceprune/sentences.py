@@ -1,9 +1,6 @@
-"""Sentence splitting and windowing — byte-for-byte the code the models were trained with.
+"""Sentence splitting and windowing.
 
-`sentences(text)` returns (start, end) offsets into the ORIGINAL text; nothing is
-normalised before splitting, so every kept sentence is a verbatim slice of the page.
-`windows(text)` groups consecutive sentences into windows of at most 48 sentences or
-10,000 characters, whichever comes first; their union is exactly `sentences(text)`.
+sentences(text) returns (start, end) offsets into the original text. 
 """
 from __future__ import annotations
 
@@ -20,10 +17,7 @@ _END = re.compile(r"[.!?][\"'”’)\]]*\s")
 
 
 def sentences(text: str) -> list[tuple[int, int]]:
-    """(start, end) spans of sentence-ish units, verbatim offsets.
-
-    Newlines are hard boundaries; inside a line we split on terminal punctuation
-    with a small abbreviation guard. Deterministic."""
+   
     spans = []
     pos = 0
     for line in text.split("\n"):
@@ -46,7 +40,7 @@ def sentences(text: str) -> list[tuple[int, int]]:
 
 
 def windows(text: str, max_sents: int = WINDOW_SENTS, max_chars: int = WINDOW_CHARS) -> list[list[tuple[int, int]]]:
-    """Consecutive windows of sentence spans; nothing lost, nothing duplicated."""
+    """Consecutive windows of sentence spans"""
     out, cur, n = [], [], 0
     for sp in sentences(text):
         w = sp[1] - sp[0]
