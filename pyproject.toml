@@ -15,9 +15,6 @@ dependencies = [
     "huggingface_hub>=0.25",
 ]
 
-[project.optional-dependencies]
-dev = ["pytest>=8"]
-
 [project.scripts]
 claimprune = "claimprune.cli:main"
 

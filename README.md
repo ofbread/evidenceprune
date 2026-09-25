@@ -78,8 +78,7 @@ reading statistics for every document.
    joined with `[…]`; one page contributes at most 12,000 characters, cut at a sentence boundary.
 
 Everything above is the code the paper's numbers were produced with, reduced to what
-inference needs; `tests/` checks the windowing, the prompt and the reading rule with a stub
-scorer and needs no model.
+inference needs.
 
 ## Models
 
