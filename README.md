@@ -133,6 +133,27 @@ after two consecutive windows where nothing is kept.
 | `windows_read`, `n_windows` | int | windows the model read, windows in the page |
 | `stopped_early` | bool | whether the stop rule ended the read |
 
+## Evaluation
+
+```python
+import json
+from evidenceprune.evaluation import averitec, claude, ev2r, judge, openai_compatible, verifier
+
+record = json.load(open("dev.json"))[102]          # one claim from the AVeriTeC dev set
+pool = [{"text": r.text, "title": p["title"], "url": p["url"]}
+        for p, r in zip(pages, results) if r.text]  # pages pruned as in the example above
+
+qwen = openai_compatible("http://localhost:8000/v1", "Qwen/Qwen3.8-27B", max_tokens=700)
+v = verifier.verify(qwen, record["claim"], pool, claim_date=averitec.claim_date(record),
+                    gold=averitec.gold_verdict(record))
+print(v["verdict"], v["score"])                     # e.g. refuted right
+
+grader = openai_compatible("http://localhost:8000/v1", "Qwen/Qwen3.8-27B", max_tokens=60)
+print(ev2r.recall(grader, pool, averitec.qa_pairs(record))["recall"])
+
+print(judge.judge(claude(), record["claim"], averitec.questions(record), pool))
+```
+
 ## License
 
 Apache-2.0
