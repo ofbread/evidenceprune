@@ -13,7 +13,7 @@ def is_encoder_dir(model_dir: str) -> bool:
         return False
     try:
         return "bert" in str(json.loads(cfg.read_text()).get("model_type", "")).lower()
-    except Exception:  
+    except Exception:
         return False
 
 
@@ -54,7 +54,7 @@ class EncoderScorer:
         kw = {"num_labels": 2}
         try:
             self.model = T.AutoModelForTokenClassification.from_pretrained(model_dir, **({"dtype": dt} if dt else {}), **kw)
-        except TypeError:                     
+        except TypeError:
             self.model = T.AutoModelForTokenClassification.from_pretrained(model_dir, torch_dtype=dt, **kw)
         self.model.to(self.device).eval()
         self.max_len = max_len

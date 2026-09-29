@@ -98,7 +98,7 @@ forward pass gives, at each marker, the logits of the tokens `keep` and `drop`. 
 is that sentence's P(keep). The encoder gets the same prompt as plain text and classifies every
 token. A sentence's P(keep) is the mean over its tokens. A sentence is kept when P(keep) is at
 or above a threshold. A page is read for at most 16 windows, and reading stops
-after two consecutive windows where nothing is kept. 
+after two consecutive windows where nothing is kept.
 
 ## Input
 
@@ -136,23 +136,30 @@ after two consecutive windows where nothing is kept.
 ## Evaluation
 
 ```python
-import json
-from evidenceprune.evaluation import averitec, claude, ev2r, judge, openai_compatible, verifier
+from evidenceprune.evaluation import claude, ev2r, judge, openai_compatible, verifier
 
-record = json.load(open("dev.json"))[102]          # one claim from the AVeriTeC dev set
+# the pages pruned in the example above
 pool = [{"text": r.text, "title": p["title"], "url": p["url"]}
-        for p, r in zip(pages, results) if r.text]  # pages pruned as in the example above
+        for p, r in zip(pages, results) if r.text]
+
+# annotations for the example claim: the questions a fact-checker would ask, and their answers
+questions = ["When did GM sell the Lordstown plant, and to whom?",
+             "What did the plant make before it closed?"]
+qa_pairs = [(questions[0], "GM sold the plant to Lordstown Motors Corp. in November 2019."),
+            (questions[1], "The plant built the Chevrolet Cruze until March 2019.")]
 
 qwen = openai_compatible("http://localhost:8000/v1", "Qwen/Qwen3.8-27B", max_tokens=700)
-v = verifier.verify(qwen, record["claim"], pool, claim_date=averitec.claim_date(record),
-                    gold=averitec.gold_verdict(record))
-print(v["verdict"], v["score"])                     # e.g. refuted right
+v = verifier.verify(qwen, claim, pool, claim_date="2019-11-20", gold="supported")
+print(v["verdict"], v["score"], v["because"])
 
 grader = openai_compatible("http://localhost:8000/v1", "Qwen/Qwen3.8-27B", max_tokens=60)
-print(ev2r.recall(grader, pool, averitec.qa_pairs(record))["recall"])
+print(ev2r.recall(grader, pool, qa_pairs)["recall"])
 
-print(judge.judge(claude(), record["claim"], averitec.questions(record), pool))
+print(judge.judge(claude(), claim, questions, pool))
 ```
+
+For a claim from the AVeriTeC dev set, `averitec.gold_verdict(record)`, `averitec.claim_date(record)`,
+`averitec.questions(record)` and `averitec.qa_pairs(record)` read the same inputs from its record.
 
 ## License
 

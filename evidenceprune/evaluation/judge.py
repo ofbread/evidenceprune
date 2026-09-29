@@ -1,9 +1,9 @@
 """The blind judge: sufficiency, coverage and relevance precision of an evidence pool.
 
-The judge  sees the claim, the annotators' questions and 
-every document of the pool, in shuffled order and without the method's name. It
-grades each document's relevance from 0 to 3, marks each question answered, partial or absent,
-and says whether the pool is sufficient to settle the claim. Per claim:
+The judge sees the claim, the annotators' questions and every document of the pool, shuffled
+when a seed is given and without the method's name. It grades each document's relevance from
+0 to 3, marks each question answered, partial or absent, and says whether the pool is
+sufficient to settle the claim. Per claim:
 
     sufficiency  1 if the judge says the pool is sufficient, else 0
     coverage     questions marked answered / questions

@@ -1,6 +1,6 @@
 """Sentence splitting and windowing.
 
-sentences(text) returns (start, end) offsets into the original text. 
+sentences(text) returns (start, end) offsets into the original text.
 """
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ _END = re.compile(r"[.!?][\"'”’)\]]*\s")
 
 
 def sentences(text: str) -> list[tuple[int, int]]:
-   
     spans = []
     pos = 0
     for line in text.split("\n"):

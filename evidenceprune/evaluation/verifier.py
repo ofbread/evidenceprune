@@ -22,8 +22,8 @@ Reply with ONLY JSON:
 "because": "<one short sentence>"}}"""
 
 NO_DOCUMENTS = '(no documents were retrieved)'
-DOC_CAP = 12_000            
-PROMPT_BUDGET = 600_000    
+DOC_CAP = 12_000
+PROMPT_BUDGET = 600_000
 VERDICTS = ("supported", "refuted", "conflicting", "cannot_determine")
 
 _FOLD = str.maketrans({"\u201c": '"', "\u201d": '"', "\u2018": "'", "\u2019": "'",

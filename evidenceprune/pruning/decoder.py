@@ -17,7 +17,7 @@ def block_kernel_packages(names=("fla", "causal_conv1d")) -> list[str]:
     blocked = []
     for n in names:
         if n in sys.modules and sys.modules[n] is not None:
-            warnings.warn(f"{n} is already imported; the fast kernels stay on")  
+            warnings.warn(f"{n} is already imported; the fast kernels stay on")
             continue
         sys.modules[n] = None
         blocked.append(n)
@@ -39,11 +39,10 @@ def as_ids(x) -> list[int]:
 
 
 class Pieces:
-
     def __init__(self, tok):
         self.tok = tok
-        self.keep = self._one(KEEP)       
-        self.drop = self._one(DROP)       
+        self.keep = self._one(KEEP)
+        self.drop = self._one(DROP)
         self.nl = as_ids(tok(NL, add_special_tokens=False))
         self._markers: dict[int, list[int]] = {}
 
@@ -89,12 +88,11 @@ def prompt_ids(tok, prompt: str, system: str) -> list[int]:
 def _architectures(path: str) -> list[str]:
     try:
         return list(json.loads((Path(path) / "config.json").read_text()).get("architectures") or [])
-    except Exception:  
+    except Exception:
         return []
 
 
 def load_model(path: str, dtype):
-
     import transformers as T
     archs = _architectures(path)
     names = (("AutoModelForImageTextToText",) if any(a.endswith("ForConditionalGeneration") for a in archs)
@@ -128,13 +126,12 @@ class DecoderScorer:
         self.model.eval()
 
     def score(self, prompt: str, system: str, ids: list[int]) -> list[float]:
-
         import torch
-        p = prompt_ids(self.tok, prompt, system)                          
-        b, pos = self.pieces.block(len(ids), ids[0] if ids else 0)         
+        p = prompt_ids(self.tok, prompt, system)
+        b, pos = self.pieces.block(len(ids), ids[0] if ids else 0)
         inp = torch.tensor([p + b], dtype=torch.long, device=self.device)
         att = torch.ones_like(inp)
-        marks = torch.tensor([[-100] * len(p) + pos], dtype=torch.long)    
+        marks = torch.tensor([[-100] * len(p) + pos], dtype=torch.long)
         with torch.no_grad():
             logits = self.model(input_ids=inp, attention_mask=att).logits[:, :-1, :]   # logits[t] predicts token t+1
         where = (marks[0, 1:] != -100).nonzero(as_tuple=True)[0].to(logits.device)

@@ -22,7 +22,7 @@ def domain_of(url: str) -> str:
     """The host of a url, lower-cased, without a leading www."""
     try:
         h = (urlparse(url).netloc or "").lower()
-    except Exception:  
+    except Exception:
         return ""
     return h[4:] if h.startswith("www.") else h
 
@@ -56,7 +56,7 @@ class Pruned:
     probs: dict[int, float]                    # sentence index -> P(keep), for the sentences that were read
     n_sentences: int                           # sentences in the document's text
     n_windows: int                             # windows in the document
-    windows_read: int                         
+    windows_read: int
     stopped_early: bool
     title_kept: bool = False                   # the title is scored too
     title_prob: float | None = None
@@ -72,7 +72,7 @@ def _load_threshold(model_dir: str, kind: str) -> float:
     if p.exists():
         try:
             return float(json.loads(p.read_text())["threshold"])
-        except Exception:  
+        except Exception:
             pass
     return DEFAULT_THRESHOLDS[kind]
 
@@ -85,7 +85,7 @@ def _resolve(model: str) -> str:
         from huggingface_hub import snapshot_download
         try:
             return snapshot_download(model)
-        except Exception as e:  
+        except Exception as e:
             raise FileNotFoundError(f"{model} is not a local checkpoint folder, and fetching it from the "
                                     f"Hugging Face Hub failed: {e}") from None
     raise FileNotFoundError(f"{model} is not a checkpoint folder (no config.json) and not a Hub id such as "
@@ -105,7 +105,6 @@ def merge_intervals(spans: list[tuple[int, int]], picks: list[int]) -> list[tupl
 
 
 def cap_document(text: str, ceiling: int = DOC_CEILING) -> str:
-
     if not ceiling or len(text) <= ceiling:
         return text
     cut = text[:ceiling]
@@ -117,7 +116,6 @@ def cap_document(text: str, ceiling: int = DOC_CEILING) -> str:
 
 
 class Pruner:
-
     def __init__(self, model: str | None = None, *, threshold: float | None = None,
                  scorer: Scorer | None = None, device: str | None = None):
         self.system = P.SYSTEM
